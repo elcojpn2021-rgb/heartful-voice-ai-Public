@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ハートフルボイスAI - KV管理ツール</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(145deg, #fce4ec 0%, #fdf6fa 50%, #e8f5e9 100%);
+    min-height: 100vh; font-family: 'Noto Sans JP', sans-serif;
+    padding: 32px 16px;
+  }
+  .container { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  h1 { font-size: 18px; font-weight: 700; color: #3a2040; text-align: center; }
+  .card {
+    background: rgba(255,255,255,0.80); border-radius: 16px;
+    border: 1px solid rgba(240,98,146,.18); padding: 20px;
+    box-shadow: 0 4px 16px rgba(240,98,146,.10);
+  }
+  .card h2 { font-size: 14px; font-weight: 700; color: #e91e8c; margin-bottom: 14px; }
+  label { font-size: 12px; color: #a07898; display: block; margin-bottom: 4px; }
+  input, select {
+    width: 100%; padding: 10px 14px; margin-bottom: 10px;
+    background: rgba(255,255,255,0.90); border: 1px solid rgba(240,98,146,.25);
+    border-radius: 10px; font-size: 14px; font-family: inherit; outline: none;
+    color: #3a2040;
+  }
+  input:focus { border-color: #f06292; }
+  .btn {
+    width: 100%; padding: 12px;
+    background: linear-gradient(135deg, #f06292, #66bb6a);
+    border: none; border-radius: 12px;
+    color: #fff; font-size: 14px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(240,98,146,.25);
+  }
+  .btn:hover { opacity: .88; }
+  .btn.danger {
+    background: linear-gradient(135deg, #e53935, #b71c1c);
+    box-shadow: 0 4px 14px rgba(229,57,53,.25);
+  }
+  .result {
+    margin-top: 12px; padding: 12px 14px;
+    border-radius: 10px; font-size: 12px; line-height: 1.9;
+    display: none;
+  }
+  .result.ok  { background: rgba(165,214,167,.2); border: 1px solid rgba(102,187,106,.3); color: #2e7d32; }
+  .result.err { background: rgba(229,57,53,.08);  border: 1px solid rgba(229,57,53,.25);  color: #c62828; }
+  .key-gen { display: flex; gap: 8px; }
+  .key-gen input { margin-bottom: 0; }
+  .btn-sm {
+    padding: 10px 14px; white-space: nowrap;
+    background: rgba(240,98,146,.12); border: 1px solid rgba(240,98,146,.3);
+    border-radius: 10px; font-size: 12px; font-weight: 700;
+    color: #e91e8c; cursor: pointer; font-family: inherit;
+  }
+  .notice { font-size: 11px; color: #a07898; text-align: center; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>💗 ハートフルボイスAI<br>KV管理ツール</h1>
+
+  <!-- Worker URL設定 -->
+  <div class="card">
+    <h2>⚙ Worker URL設定</h2>
+    <label>Worker URL（一度入力すれば保存されます）</label>
+    <input type="text" id="worker-url"
+           placeholder="https://heartful-voice-worker.YOUR.workers.dev">
+    <button class="btn" onclick="saveWorkerUrl()">保存</button>
+    <div class="result" id="url-result"></div>
+  </div>
+
+  <!-- キー発行 -->
+  <div class="card">
+    <h2>🔑 プレミアムキー発行</h2>
+    <label>アクセスキー（自動生成 or 手入力）</label>
+    <div class="key-gen">
+      <input type="text" id="new-key" placeholder="VOICE-P-XXXX-XXXX">
+      <button class="btn-sm" onclick="genKey()">自動生成</button>
+    </div>
+    <label style="margin-top:8px">発行日（有効期限の起算日）</label>
+    <input type="text" id="created-date" placeholder="2026-07-08（ハイフン区切り）">
+    <button class="btn" onclick="issueKey()">キーをKVに登録する</button>
+    <div class="result" id="issue-result"></div>
+  </div>
+
+  <!-- キー照会 -->
+  <div class="card">
+    <h2>🔍 キー照会</h2>
+    <label>アクセスキー</label>
+    <input type="text" id="lookup-key" placeholder="VOICE-P-XXXX-XXXX">
+    <button class="btn" onclick="lookupKey()">照会する</button>
+    <div class="result" id="lookup-result"></div>
+  </div>
+
+  <!-- キー削除 -->
+  <div class="card">
+    <h2>🗑 キー無効化（削除）</h2>
+    <label>アクセスキー</label>
+    <input type="text" id="delete-key" placeholder="VOICE-P-XXXX-XXXX">
+    <button class="btn danger" onclick="deleteKey()">このキーを無効にする</button>
+    <div class="result" id="delete-result"></div>
+  </div>
+
+  <p class="notice">
+    ※ このツールはローカルで使用してください。<br>
+    ※ 公開URLに置かないよう注意してください。
+  </p>
+</div>
+
+<script>
+const STORAGE_KEY = 'hva_admin_worker_url';
+
+// 起動時にWorker URLを復元
+window.onload = () => {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) document.getElementById('worker-url').value = saved;
+
+  // 今日の日付をデフォルト
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('created-date').value = today; // 例: 2026-07-08
+};
+
+function getWorkerUrl() {
+  return (localStorage.getItem(STORAGE_KEY) || '').replace(/\/$/, '');
+}
+
+function saveWorkerUrl() {
+  const url = document.getElementById('worker-url').value.trim();
+  localStorage.setItem(STORAGE_KEY, url);
+  showResult('url-result', 'ok', '✓ Worker URLを保存しました');
+}
+
+// ランダムキー生成
+function genKey() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const rand4 = () => Array.from({length:4}, () => chars[Math.floor(Math.random()*chars.length)]).join('');
+  document.getElementById('new-key').value = `VOICE-P-${rand4()}-${rand4()}`;
+}
+
+// キー発行（/admin/set-key エンドポイント経由）
+async function issueKey() {
+  const key     = document.getElementById('new-key').value.trim().toUpperCase();
+  const created = document.getElementById('created-date').value;
+  const workerUrl = getWorkerUrl();
+
+  if (!workerUrl) return showResult('issue-result', 'err', 'Worker URLを設定してください');
+  if (!/^VOICE-P-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key))
+    return showResult('issue-result', 'err', 'キーの形式が正しくありません');
+  if (!created) return showResult('issue-result', 'err', '発行日を入力してください');
+
+  try {
+    const res  = await fetch(workerUrl + '/admin/set-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, created })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showResult('issue-result', 'ok',
+        `✓ キーを登録しました\nキー: ${key}\n発行日: ${created}\n有効期限: ${data.expires}`);
+    } else {
+      showResult('issue-result', 'err', data.message || '登録に失敗しました');
+    }
+  } catch(e) {
+    showResult('issue-result', 'err', '通信エラー: ' + e.message);
+  }
+}
+
+// キー照会
+async function lookupKey() {
+  const key = document.getElementById('lookup-key').value.trim().toUpperCase();
+  const workerUrl = getWorkerUrl();
+  if (!workerUrl) return showResult('lookup-result', 'err', 'Worker URLを設定してください');
+
+  try {
+    const res  = await fetch(workerUrl + '/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key })
+    });
+    const data = await res.json();
+    if (data.valid) {
+      showResult('lookup-result', 'ok',
+        `✓ 有効なキーです\n残り回数（本日）: ${data.remain} 回\n有効期限: ${data.expires}`);
+    } else {
+      showResult('lookup-result', 'err', `✗ ${data.message}`);
+    }
+  } catch(e) {
+    showResult('lookup-result', 'err', '通信エラー: ' + e.message);
+  }
+}
+
+// キー削除
+async function deleteKey() {
+  const key = document.getElementById('delete-key').value.trim().toUpperCase();
+  const workerUrl = getWorkerUrl();
+  if (!workerUrl) return showResult('delete-result', 'err', 'Worker URLを設定してください');
+  if (!confirm(`キー「${key}」を無効にしますか？`)) return;
+
+  try {
+    const res  = await fetch(workerUrl + '/admin/delete-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showResult('delete-result', 'ok', `✓ キー「${key}」を無効にしました`);
+    } else {
+      showResult('delete-result', 'err', data.message || '削除に失敗しました');
+    }
+  } catch(e) {
+    showResult('delete-result', 'err', '通信エラー: ' + e.message);
+  }
+}
+
+function showResult(id, type, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className   = `result ${type}`;
+  el.style.display = 'block';
+}
+</script>
+</body>
+</html>
